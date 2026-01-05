@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Карта України — фарбування областей</title>
+  <style>
+    body { margin: 0; font-family: system-ui, Arial; }
+    .app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+    .panel { padding: 16px; border-right: 1px solid #ddd; display: flex; flex-direction: column; gap: 12px; }
+    .mapWrap { padding: 16px; overflow: auto; }
+
+    .row { display: flex; align-items: center; gap: 10px; }
+    .btn { padding: 10px 12px; border: 1px solid #ccc; background: #fff; border-radius: 10px; cursor: pointer; }
+    .btn:active { transform: translateY(1px); }
+    .hint { font-size: 13px; opacity: .75; line-height: 1.35; }
+
+    /* Підсвітка вибраної області */
+    .region { cursor: pointer; transition: opacity .1s ease; }
+    .region:hover { opacity: .9; }
+    .selected { outline: none; filter: drop-shadow(0 0 2px rgba(0,0,0,.35)); }
+
+    /* щоб SVG не “стискався” */
+    svg { width: max(900px, 100%); height: auto; display: block; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel">
+      <h2 style="margin:0 0 6px;">Фарбування областей</h2>
+
+      <div class="row">
+        <input id="color" type="color" value="#ffcc00" />
+        <button class="btn" id="apply">Застосувати колір</button>
+      </div>
+
+      <div class="row">
+        <button class="btn" id="reset">Скинути виділення</button>
+        <button class="btn" id="export">Експорт SVG</button>
+      </div>
+
+      <div id="info" class="hint">
+        1) Клікни по області на карті<br/>
+        2) Обери колір<br/>
+        3) Натисни “Застосувати колір”
+      </div>
+
+      <div class="hint" style="margin-top:auto;">
+        Порада: якщо треба список з назвами областей — скажи, дам варіант під GeoJSON / нормальні id.
+      </div>
+    </aside>
+
+    <main class="mapWrap">
+      <div id="mapHost">Завантаження карти…</div>
+    </main>
+  </div>
+
+  <script>
+    const mapHost = document.getElementById('mapHost');
+    const colorInput = document.getElementById('color');
+    const info = document.getElementById('info');
+
+    let svgEl = null;
+    let selectedEl = null;
+    let selectedLabel = '';
+
+    // 1) Підвантажити SVG як inline (щоб можна було міняти fill)
+    fetch('map.svg')
+      .then(r => r.text())
+      .then(svgText => {
+        mapHost.innerHTML = svgText;
+        svgEl = mapHost.querySelector('svg');
+
+        // 2) Позначимо елементи-області класом .region
+        // Беремо path/polygon (можеш додати rect якщо треба)
+        const candidates = svgEl.querySelectorAll('path, polygon');
+
+        candidates.forEach((el, idx) => {
+          // фільтр: ігноруємо "none" і дуже дрібні технічні елементи
+          const fill = (el.getAttribute('fill') || '').toLowerCase();
+          if (fill === 'none') return;
+
+          el.classList.add('region');
+
+          // Якщо нема id — дамо тимчасовий, щоб було зручніше дебажити
+          if (!el.id) el.id = `region-${idx+1}`;
+        });
+
+        // 3) Клік по області = вибір
+        svgEl.addEventListener('click', (e) => {
+          const target = e.target.closest('.region');
+          if (!target) return;
+
+          selectRegion(target);
+        });
+
+        info.textContent = 'Клікни по області на карті, щоб вибрати її.';
+      })
+      .catch(err => {
+        mapHost.textContent = 'Не вдалося завантажити map.svg. Перевір, що файл лежить поруч з index.html';
+        console.error(err);
+      });
+
+    function selectRegion(el) {
+      if (selectedEl) selectedEl.classList.remove('selected');
+      selectedEl = el;
+      selectedEl.classList.add('selected');
+
+      // Підтягнемо поточний колір у picker (якщо він у hex)
+      const fill = selectedEl.getAttribute('fill') || getComputedStyle(selectedEl).fill;
+      const hex = rgbToHex(fill);
+      if (hex) colorInput.value = hex;
+
+      selectedLabel = selectedEl.id || '(no-id)';
+      info.innerHTML = `Вибрано: <b>${escapeHtml(selectedLabel)}</b>`;
+    }
+
+    document.getElementById('apply').addEventListener('click', () => {
+      if (!selectedEl) {
+        alert('Спочатку клікни по області на карті 🙂');
+        return;
+      }
+      selectedEl.style.setProperty('fill', colorInput.value, 'important');
+        selectedEl.setAttribute('fill', colorInput.value);
+    });
+
+    document.getElementById('reset').addEventListener('click', () => {
+      if (selectedEl) selectedEl.classList.remove('selected');
+      selectedEl = null;
+      info.textContent = 'Виділення скинуто. Клікни по області на карті.';
+    });
+
+    document.getElementById('export').addEventListener('click', () => {
+        if (!svgEl) return;
+
+        const serializer = new XMLSerializer();
+        const svgText = serializer.serializeToString(svgEl);
+
+        // --- створюємо image з SVG ---
+        const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+
+        const img = new Image();
+
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const bbox = svgEl.getBBox();
+
+            // масштаб (можеш поставити 2 або 3 для кращої якості)
+            const scale = 3;
+
+            canvas.width = bbox.width * scale;
+            canvas.height = bbox.height * scale;
+
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+            ctx.drawImage(img, -bbox.x, -bbox.y);
+
+            // PNG
+            const pngUrl = canvas.toDataURL('image/png');
+
+            const a = document.createElement('a');
+            a.href = pngUrl;
+            a.download = 'ukraine-map.png';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+
+            URL.revokeObjectURL(url);
+        };
+
+        img.src = url;
+        });
+
+    // --- helpers ---
+    function rgbToHex(color) {
+      // приймає rgb(...) або #rrggbb
+      if (!color) return null;
+      const c = color.trim().toLowerCase();
+      if (c.startsWith('#') && (c.length === 7 || c.length === 4)) return normalizeHex(c);
+
+      const m = c.match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/);
+      if (!m) return null;
+      const r = (+m[1]).toString(16).padStart(2,'0');
+      const g = (+m[2]).toString(16).padStart(2,'0');
+      const b = (+m[3]).toString(16).padStart(2,'0');
+      return `#${r}${g}${b}`;
+    }
+
+    function normalizeHex(hex) {
+      // #abc -> #aabbcc
+      if (hex.length === 4) {
+        return '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+      }
+      return hex;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (ch) => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[ch]));
+    }
+  </script>
+</body>
+</html>
