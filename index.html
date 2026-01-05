@@ -10,7 +10,7 @@
     .panel { padding: 16px; border-right: 1px solid #ddd; display: flex; flex-direction: column; gap: 12px; }
     .mapWrap { padding: 16px; overflow: auto; }
 
-    .row { display: flex; align-items: center; gap: 10px; }
+    .row { display: flex; align-items: center; gap: 10px;     flex-wrap: wrap; }
     .btn { padding: 10px 12px; border: 1px solid #ccc; background: #fff; border-radius: 10px; cursor: pointer; }
     .btn:active { transform: translateY(1px); }
     .hint { font-size: 13px; opacity: .75; line-height: 1.35; }
@@ -22,6 +22,24 @@
 
     /* щоб SVG не “стискався” */
     svg { width: max(900px, 100%); height: auto; display: block; }
+
+    .palette {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    }
+
+    .palette button {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 2px solid #ccc;
+    cursor: pointer;
+    }
+
+    .palette button.active {
+    border-color: #000;
+    }
   </style>
 </head>
 <body>
@@ -30,7 +48,8 @@
       <h2 style="margin:0 0 6px;">Фарбування областей</h2>
 
       <div class="row">
-        <input id="color" type="color" value="#ffcc00" />
+        <!-- <input id="color" type="color" value="#ffcc00" /> -->
+        <div id="palette" class="palette"></div>
         <button class="btn" id="apply">Застосувати колір</button>
       </div>
 
@@ -55,12 +74,49 @@
 
   <script>
     const mapHost = document.getElementById('mapHost');
-    const colorInput = document.getElementById('color');
+    // const colorInput = document.getElementById('color');
     const info = document.getElementById('info');
 
     let svgEl = null;
     let selectedEl = null;
     let selectedLabel = '';
+
+    const PALETTE = [
+    '#F4C2C2',
+    '#F6D6A8',
+    '#FFF2A8',
+    '#CDEAC0',
+    '#BEE7E8',
+    '#CFE0F5',
+    '#E0D4F7',
+    '#EADBC8',
+    '#D9D9D9',
+    '#CCCCCC'
+    ];
+
+    let selectedColor = PALETTE[0];
+
+    // логіка вибору кольору
+
+    const paletteEl = document.getElementById('palette');
+
+    PALETTE.forEach(color => {
+    const btn = document.createElement('button');
+    btn.style.background = color;
+
+    btn.addEventListener('click', () => {
+        selectedColor = color;
+
+        // активна кнопка
+        paletteEl.querySelectorAll('button')
+        .forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    });
+
+    paletteEl.appendChild(btn);
+    });
+
+    paletteEl.querySelector('button')?.classList.add('active');
 
     // 1) Підвантажити SVG як inline (щоб можна було міняти fill)
     fetch('map.svg')
@@ -90,6 +146,9 @@
           if (!target) return;
 
           selectRegion(target);
+            console.log('CLICKED ID:', selectedEl.id);
+            console.log('FILL:', selectedEl.getAttribute('fill'));
+            console.log('D snippet:', (selectedEl.getAttribute('d') || '').slice(0, 120));
         });
 
         info.textContent = 'Клікни по області на карті, щоб вибрати її.';
@@ -106,20 +165,23 @@
 
       // Підтягнемо поточний колір у picker (якщо він у hex)
       const fill = selectedEl.getAttribute('fill') || getComputedStyle(selectedEl).fill;
-      const hex = rgbToHex(fill);
-      if (hex) colorInput.value = hex;
+    //   const hex = rgbToHex(fill);
+    //   if (hex) colorInput.value = hex;
 
       selectedLabel = selectedEl.id || '(no-id)';
       info.innerHTML = `Вибрано: <b>${escapeHtml(selectedLabel)}</b>`;
     }
 
     document.getElementById('apply').addEventListener('click', () => {
-      if (!selectedEl) {
-        alert('Спочатку клікни по області на карті 🙂');
+    if (!selectedEl) {
+        alert('Спочатку клікни по області на карті');
         return;
-      }
-      selectedEl.style.setProperty('fill', colorInput.value, 'important');
-        selectedEl.setAttribute('fill', colorInput.value);
+    }
+
+    const newColor = selectedColor;
+
+    selectedEl.style.setProperty('fill', newColor, 'important');
+    selectedEl.setAttribute('fill', newColor);
     });
 
     document.getElementById('reset').addEventListener('click', () => {
@@ -201,5 +263,3 @@
   </script>
 </body>
 </html>
-
-
